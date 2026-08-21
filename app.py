@@ -19,17 +19,25 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from account_meta import LOGOS_DIR, get_account_meta, save_account_meta
 from paths import (
     AGENT_INPUTS,
     AI_FUNDAMENTALS,
     DATA_RAW,
     DELIVERY_COPILOT,
+    DELIVERY_EVALS,
     DELIVERY_STATUS_AGENT,
     EVAL_RESULTS_DIR,
+    EVALS_RESULTS_DIR,
     REPORTS_DIR,
     REPOS,
     RESULTS_DIR,
     list_accounts,
+    list_agent_inputs,
+    private_agent_inputs_dir,
+    private_data_dir,
+    private_data_root,
+    save_private_data_root,
     venv_python,
 )
 
@@ -63,7 +71,7 @@ def mcp_status() -> str:
 def run_script(repo_dir: Path, script: str, args: list[str]) -> subprocess.CompletedProcess:
     python = venv_python(repo_dir)
     return subprocess.run(
-        [str(python), script, *args], cwd=repo_dir, capture_output=True, text=True, timeout=300,
+        [str(python), script, *args], cwd=repo_dir, capture_output=True, text=True, timeout=600,
     )
 
 
@@ -86,19 +94,69 @@ def load_all_json(dir_: Path) -> list[dict]:
     return out
 
 
-# ---------------------------------------------------------------- header --
+# ---------------------------------------------------------- sidebar / ops --
 
-st.title("🛰️ Delivery Cockpit")
-st.caption("Run, browse, and check the cost of everything in the AI-Forward Delivery Leader Build Program, without hand-recalling four venvs' worth of commands.")
+with st.sidebar:
+    st.caption("🛰️ Delivery Cockpit")
+    st.caption("Run, browse, and check the cost of everything in the AI-Forward Delivery Leader Build Program, without hand-recalling four venvs' worth of commands.")
+    st.divider()
+    with st.expander("Dev / ops status", expanded=False):
+        for name, repo_dir in REPOS.items():
+            st.caption(f"**{name}** · `{git_head(repo_dir)}`")
+        st.caption(f"**MCP server** · {mcp_status()}")
 
-cols = st.columns(5)
-for i, (name, repo_dir) in enumerate(REPOS.items()):
-    cols[i].metric(name, git_head(repo_dir))
-cols[4].metric("MCP server", mcp_status())
+# --------------------------------------------------------- account banner --
 
 accounts = list_accounts()
+st.session_state.setdefault("cockpit_account", None)
+if accounts and st.session_state.cockpit_account not in accounts:
+    st.session_state.cockpit_account = accounts[0]
 
-tab_run, tab_browse, tab_status = st.tabs(["▶ Run", "📂 Browse", "💰 Status & cost"])
+meta = get_account_meta(st.session_state.cockpit_account) if st.session_state.cockpit_account else None
+
+with st.container(key="account-header", border=True):
+    cols = st.columns([1, 6, 3], vertical_alignment="center")
+    with cols[0]:
+        if meta and meta.logo and (meta.logo.startswith("http") or Path(meta.logo).exists()):
+            st.image(meta.logo, width=48)
+        else:
+            st.markdown(f"<span style='font-size:2.5rem'>{(meta.logo if meta else None) or '🏢'}</span>", unsafe_allow_html=True)
+    with cols[1]:
+        st.subheader(meta.display_name if meta else "No account selected")
+        if meta and meta.description:
+            st.caption(meta.description)
+    with cols[2]:
+        if accounts:
+            st.selectbox("Account", accounts, key="cockpit_account", label_visibility="collapsed")
+            with st.popover("✎ Edit account details"):
+                with st.form("account_meta_form"):
+                    new_display_name = st.text_input("Display name", value=meta.display_name)
+                    new_accent_color = st.color_picker("Accent color", value=meta.accent_color)
+                    new_logo = st.text_input("Logo (emoji, path, or URL)", value=meta.logo or "")
+                    new_logo_upload = st.file_uploader("...or upload a logo image", type=["png", "jpg", "jpeg", "svg"])
+                    new_description = st.text_area("Description", value=meta.description)
+                    if st.form_submit_button("Save"):
+                        logo_value = new_logo
+                        if new_logo_upload is not None:
+                            LOGOS_DIR.mkdir(parents=True, exist_ok=True)
+                            ext = Path(new_logo_upload.name).suffix
+                            logo_path = LOGOS_DIR / f"{meta.slug}{ext}"
+                            logo_path.write_bytes(new_logo_upload.getvalue())
+                            logo_value = str(logo_path)
+                        save_account_meta(meta.slug, {
+                            "display_name": new_display_name,
+                            "accent_color": new_accent_color,
+                            "logo": logo_value,
+                            "description": new_description,
+                        })
+                        st.rerun()
+        else:
+            st.warning("No accounts found.")
+
+if meta:
+    st.html(f"<style>.st-key-account-header {{ border-left: 6px solid {meta.accent_color}; }}</style>")
+
+tab_run, tab_browse, tab_status, tab_private = st.tabs(["▶ Run", "📂 Browse", "💰 Status & cost", "🔒 Private notes"])
 
 # ------------------------------------------------------------------ run --
 
@@ -114,13 +172,15 @@ with tab_run:
             "Rebuild an index (delivery-copilot ingest)",
             "Run the eval suite (delivery-copilot eval)",
             "Run a PH.00 experiment (ai-fundamentals-rig)",
+            "Run LLM-judge evals (delivery-evals)",
         ],
     )
 
     if tool.startswith("Ask a question"):
+        account = st.session_state.cockpit_account
         with st.form("ask_form"):
             question = st.text_input("Question")
-            account = st.selectbox("Account", accounts) if accounts else None
+            st.caption(f"Account: **{account}**" if account else "No account selected")
             effort = st.selectbox("Effort", EFFORT_CHOICES, index=0)
             submitted = st.form_submit_button("Run")
         if submitted and question.strip() and account:
@@ -131,14 +191,15 @@ with tab_run:
                 st.error("ask.py exited with an error.")
 
     elif tool.startswith("Run the agent"):
-        input_files = sorted(AGENT_INPUTS.glob("*.md")) if AGENT_INPUTS.exists() else []
+        input_map = list_agent_inputs()  # merges public demo inputs + private ones (🔒 prefix)
+        account = st.session_state.cockpit_account
         with st.form("agent_form"):
-            input_choice = st.selectbox("Input file", [f.name for f in input_files]) if input_files else None
-            account = st.selectbox("Account", accounts, key="agent_account") if accounts else None
+            input_choice = st.selectbox("Input file", list(input_map.keys())) if input_map else None
+            st.caption(f"Account: **{account}**" if account else "No account selected")
             effort = st.selectbox("Effort", EFFORT_CHOICES, index=0, key="agent_effort")
             submitted = st.form_submit_button("Run agent")
         if submitted and input_choice and account:
-            input_path = AGENT_INPUTS / input_choice
+            input_path = input_map[input_choice]
             with st.spinner("Running agent.py — makes several tool calls, can take a minute..."):
                 result = run_script(
                     DELIVERY_STATUS_AGENT, "agent.py",
@@ -178,8 +239,8 @@ with tab_run:
     elif tool.startswith("Rebuild an index"):
         with st.form("ingest_form"):
             account = st.text_input(
-                "Account slug (existing account, or a new folder name already created under data/raw/)",
-                value=accounts[0] if accounts else "",
+                "Account slug — existing account (public or private), or a new folder already created under data/raw/ in either location",
+                value=st.session_state.cockpit_account or "",
             )
             submitted = st.form_submit_button("Rebuild")
         if submitted and account:
@@ -188,8 +249,9 @@ with tab_run:
             st.code(result.stdout or result.stderr, language="text")
 
     elif tool.startswith("Run the eval suite"):
+        account = st.session_state.cockpit_account
         with st.form("eval_form"):
-            account = st.selectbox("Account", accounts, key="eval_account") if accounts else None
+            st.caption(f"Account: **{account}**" if account else "No account selected")
             submitted = st.form_submit_button("Run eval")
         if submitted and account:
             with st.spinner("Running eval.py — 10 questions against the live API..."):
@@ -205,6 +267,25 @@ with tab_run:
             with st.spinner("Running experiments.py..."):
                 result = run_script(AI_FUNDAMENTALS, "experiments.py", ["--task", task, "--effort", effort])
             st.code(result.stdout or result.stderr, language="text")
+
+    elif tool.startswith("Run LLM-judge evals"):
+        st.caption(
+            "Judges delivery-copilot's answers and delivery-status-agent's reports "
+            "semantically instead of by keyword match — see delivery-evals/README.md."
+        )
+        with st.form("evals_form"):
+            which = st.radio(
+                "Which suite",
+                ["QA judge (10 questions, ~1 min)", "Report judge (2 scenarios, slower — the agent runs first)"],
+            )
+            submitted = st.form_submit_button("Run")
+        if submitted:
+            script = "run_qa_evals.py" if which.startswith("QA") else "run_report_evals.py"
+            with st.spinner(f"Running {script}..."):
+                result = run_script(DELIVERY_EVALS, script, [])
+            st.code(result.stdout or result.stderr, language="text")
+            if result.returncode != 0:
+                st.error(f"{script} exited with an error.")
 
 # --------------------------------------------------------------- browse --
 
@@ -225,7 +306,7 @@ with tab_browse:
             st.markdown(f.read_text())
 
     st.subheader("Generated outputs")
-    out_tabs = st.tabs(["PH.00 results", "PH.01 eval results", "PH.03 reports"])
+    out_tabs = st.tabs(["PH.00 results", "PH.01 eval results", "PH.03 reports", "PH.04 judged evals"])
     with out_tabs[0]:
         for item in reversed(load_all_json(RESULTS_DIR)):
             with st.expander(item["file"]):
@@ -238,6 +319,11 @@ with tab_browse:
         for item in reversed(load_all_json(REPORTS_DIR)):
             with st.expander(item["file"]):
                 st.json(item["data"])
+    with out_tabs[3]:
+        for item in reversed(load_all_json(EVALS_RESULTS_DIR)):
+            with st.expander(f"{item['file']} ({item['data'].get('config', {}).get('timestamp', '')})"):
+                st.json(item["data"].get("config", {}))
+                st.dataframe(pd.DataFrame(item["data"].get("results", [])), width="stretch")
 
 # --------------------------------------------------------- status & cost --
 
@@ -266,6 +352,15 @@ with tab_status:
                 "input_tokens": usage.get("input_tokens", 0), "output_tokens": usage.get("output_tokens", 0),
                 "cost_usd": usage.get("cost_usd", 0.0),
             })
+    for item in load_all_json(EVALS_RESULTS_DIR):
+        # cost_usd here already includes the judge's own call cost, not just
+        # the thing being judged — see delivery-evals/judge.py.
+        for r in (item["data"].get("results", []) if isinstance(item["data"], dict) else []):
+            rows.append({
+                "repo": "delivery-evals", "file": item["file"],
+                "input_tokens": 0, "output_tokens": 0,
+                "cost_usd": r.get("cost_usd", 0.0),
+            })
 
     if rows:
         df = pd.DataFrame(rows)
@@ -281,3 +376,71 @@ with tab_status:
         st.dataframe(df.sort_values("cost_usd", ascending=False), width="stretch")
     else:
         st.info("No cost data yet — run something from the Run tab first.")
+
+# ------------------------------------------------------------- private --
+
+with tab_private:
+    st.subheader("Where private notes live")
+    st.caption(
+        "Entirely outside every git repo in this program — not gitignored, "
+        "physically separate, so nothing saved here can ever reach GitHub "
+        "through a git command run in any of the five repos."
+    )
+    current_root = private_data_root()
+    with st.form("private_root_form"):
+        new_root = st.text_input("Private notes folder", value=str(current_root))
+        submitted_root = st.form_submit_button("Save location")
+    if submitted_root and new_root.strip():
+        save_private_data_root(Path(new_root.strip()).expanduser())
+        st.success(f"Saved. Private notes now resolve to: {Path(new_root.strip()).expanduser()}")
+        st.rerun()
+
+    st.divider()
+    st.subheader("Add a file")
+    st.caption(
+        "Upload a meeting transcript or personal notes as .md or .txt "
+        "(export/copy your Teams or Gemini notes as plain text first — "
+        ".docx isn't parsed directly yet)."
+    )
+    with st.form("private_upload_form"):
+        uploaded = st.file_uploader("File", type=["md", "txt"])
+        account_slug = st.text_input("Account (existing or new — this becomes the folder/collection name)")
+        kind = st.radio(
+            "Add as",
+            ["Indexed knowledge (searchable later via ask/agent/MCP)", "One-off agent input (process once)"],
+        )
+        submit_upload = st.form_submit_button("Save file")
+    if submit_upload and uploaded and account_slug.strip():
+        content = uploaded.getvalue().decode("utf-8", errors="replace")
+        root = private_data_root()
+        if kind.startswith("Indexed"):
+            target_dir = root / "data" / "raw" / account_slug.strip()
+        else:
+            target_dir = root / "agent_inputs"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_path = target_dir / uploaded.name
+        target_path.write_text(content)
+        st.success(f"Saved to {target_path}")
+        if kind.startswith("Indexed"):
+            st.info(f"Run \"Rebuild an index\" for account '{account_slug.strip()}' in the Run tab to make it searchable.")
+        st.rerun()
+
+    st.divider()
+    st.subheader("What's already private")
+    priv_data = private_data_dir()
+    priv_accounts = sorted(p.name for p in priv_data.iterdir() if p.is_dir()) if priv_data.exists() else []
+    if priv_accounts:
+        for acc in priv_accounts:
+            files = sorted((priv_data / acc).glob("*.md"))
+            with st.expander(f"🔒 {acc} ({len(files)} files)"):
+                for f in files:
+                    st.text(f.name)
+    else:
+        st.caption("No private accounts yet.")
+
+    priv_inputs_dir = private_agent_inputs_dir()
+    priv_inputs = sorted(priv_inputs_dir.glob("*.md")) if priv_inputs_dir.exists() else []
+    if priv_inputs:
+        st.write("**Private agent inputs**")
+        for f in priv_inputs:
+            st.text(f.name)
