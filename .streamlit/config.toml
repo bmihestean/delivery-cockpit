@@ -1,0 +1,52 @@
+# Apple-inspired theme: system font stack (renders as true San Francisco on
+# macOS/iOS), neutral near-white/near-black palette, Apple system blue as the
+# one accent — so each account's own accent color (set via the account
+# banner) reads as the deliberate pop of color, not competing chrome.
+
+[theme]
+base = "light"
+primaryColor = "#0071E3"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F5F7"
+codeBackgroundColor = "#F5F5F7"
+textColor = "#1D1D1F"
+linkColor = "#0071E3"
+borderColor = "#D2D2D7"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "12px"
+buttonRadius = "10px"
+
+font = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif"
+headingFont = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+codeFont = "'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', monospace"
+codeFontSize = "0.875rem"
+codeTextColor = "#1D1D1F"
+baseFontSize = 15
+baseFontWeight = 400
+headingFontSizes = ["34px", "28px", "22px", "19px", "17px", "15px"]
+headingFontWeights = [600, 600, 600, 600, 600, 600]
+linkUnderline = false
+
+chartCategoricalColors = ["#0071E3", "#34C759", "#FF9500", "#FF3B30", "#AF52DE", "#5856D6", "#8E8E93"]
+
+grayColor = "#8E8E93"
+blueColor = "#0071E3"
+greenColor = "#34C759"
+redColor = "#FF3B30"
+yellowColor = "#FFCC00"
+orangeColor = "#FF9500"
+violetColor = "#AF52DE"
+
+dataframeBorderColor = "#D2D2D7"
+dataframeHeaderBackgroundColor = "#F5F5F7"
+
+[theme.sidebar]
+backgroundColor = "#F5F5F7"
+secondaryBackgroundColor = "#FBFBFD"
+codeBackgroundColor = "#E8E8ED"
+textColor = "#1D1D1F"
+borderColor = "#D2D2D7"
+primaryColor = "#0071E3"
+dataframeHeaderBackgroundColor = "#E8E8ED"
+dataframeBorderColor = "#D2D2D7"

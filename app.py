@@ -100,7 +100,7 @@ with st.sidebar:
     st.caption("🛰️ Delivery Cockpit")
     st.caption("Run, browse, and check the cost of everything in the AI-Forward Delivery Leader Build Program, without hand-recalling four venvs' worth of commands.")
     st.divider()
-    with st.expander("Dev / ops status", expanded=False):
+    with st.expander("Dev / ops status", icon=":material/monitoring:", expanded=False):
         for name, repo_dir in REPOS.items():
             st.caption(f"**{name}** · `{git_head(repo_dir)}`")
         st.caption(f"**MCP server** · {mcp_status()}")
@@ -128,14 +128,14 @@ with st.container(key="account-header", border=True):
     with cols[2]:
         if accounts:
             st.selectbox("Account", accounts, key="cockpit_account", label_visibility="collapsed")
-            with st.popover("✎ Edit account details"):
+            with st.popover("Edit account details", icon=":material/edit:"):
                 with st.form("account_meta_form"):
                     new_display_name = st.text_input("Display name", value=meta.display_name)
                     new_accent_color = st.color_picker("Accent color", value=meta.accent_color)
                     new_logo = st.text_input("Logo (emoji, path, or URL)", value=meta.logo or "")
                     new_logo_upload = st.file_uploader("...or upload a logo image", type=["png", "jpg", "jpeg", "svg"])
                     new_description = st.text_area("Description", value=meta.description)
-                    if st.form_submit_button("Save"):
+                    if st.form_submit_button("Save", icon=":material/save:"):
                         logo_value = new_logo
                         if new_logo_upload is not None:
                             LOGOS_DIR.mkdir(parents=True, exist_ok=True)
@@ -156,7 +156,12 @@ with st.container(key="account-header", border=True):
 if meta:
     st.html(f"<style>.st-key-account-header {{ border-left: 6px solid {meta.accent_color}; }}</style>")
 
-tab_run, tab_browse, tab_status, tab_private = st.tabs(["▶ Run", "📂 Browse", "💰 Status & cost", "🔒 Private notes"])
+tab_run, tab_browse, tab_status, tab_private = st.tabs([
+    ":material/play_arrow: Run",
+    ":material/folder: Browse",
+    ":material/payments: Status & cost",
+    ":material/lock: Private notes",
+])
 
 # ------------------------------------------------------------------ run --
 
@@ -181,8 +186,8 @@ with tab_run:
         with st.form("ask_form"):
             question = st.text_input("Question")
             st.caption(f"Account: **{account}**" if account else "No account selected")
-            effort = st.selectbox("Effort", EFFORT_CHOICES, index=0)
-            submitted = st.form_submit_button("Run")
+            effort = st.segmented_control("Effort", EFFORT_CHOICES, default=EFFORT_CHOICES[0], required=True)
+            submitted = st.form_submit_button("Run", icon=":material/play_arrow:")
         if submitted and question.strip() and account:
             with st.spinner("Running ask.py..."):
                 result = run_script(DELIVERY_COPILOT, "ask.py", [question, "--account", account, "--effort", effort])
@@ -196,8 +201,8 @@ with tab_run:
         with st.form("agent_form"):
             input_choice = st.selectbox("Input file", list(input_map.keys())) if input_map else None
             st.caption(f"Account: **{account}**" if account else "No account selected")
-            effort = st.selectbox("Effort", EFFORT_CHOICES, index=0, key="agent_effort")
-            submitted = st.form_submit_button("Run agent")
+            effort = st.segmented_control("Effort", EFFORT_CHOICES, default=EFFORT_CHOICES[0], required=True, key="agent_effort")
+            submitted = st.form_submit_button("Run agent", icon=":material/smart_toy:")
         if submitted and input_choice and account:
             input_path = input_map[input_choice]
             with st.spinner("Running agent.py — makes several tool calls, can take a minute..."):
@@ -242,7 +247,7 @@ with tab_run:
                 "Account slug — existing account (public or private), or a new folder already created under data/raw/ in either location",
                 value=st.session_state.cockpit_account or "",
             )
-            submitted = st.form_submit_button("Rebuild")
+            submitted = st.form_submit_button("Rebuild", icon=":material/refresh:")
         if submitted and account:
             with st.spinner("Running ingest.py..."):
                 result = run_script(DELIVERY_COPILOT, "ingest.py", ["--account", account])
@@ -252,7 +257,7 @@ with tab_run:
         account = st.session_state.cockpit_account
         with st.form("eval_form"):
             st.caption(f"Account: **{account}**" if account else "No account selected")
-            submitted = st.form_submit_button("Run eval")
+            submitted = st.form_submit_button("Run eval", icon=":material/play_arrow:")
         if submitted and account:
             with st.spinner("Running eval.py — 10 questions against the live API..."):
                 result = run_script(DELIVERY_COPILOT, "eval.py", ["--account", account])
@@ -260,9 +265,9 @@ with tab_run:
 
     elif tool.startswith("Run a PH.00"):
         with st.form("exp_form"):
-            task = st.selectbox("Task", ["qbr_summary", "action_items"])
-            effort = st.selectbox("Effort", EFFORT_CHOICES, index=0, key="exp_effort")
-            submitted = st.form_submit_button("Run")
+            task = st.segmented_control("Task", ["qbr_summary", "action_items"], default="qbr_summary", required=True)
+            effort = st.segmented_control("Effort", EFFORT_CHOICES, default=EFFORT_CHOICES[0], required=True, key="exp_effort")
+            submitted = st.form_submit_button("Run", icon=":material/play_arrow:")
         if submitted:
             with st.spinner("Running experiments.py..."):
                 result = run_script(AI_FUNDAMENTALS, "experiments.py", ["--task", task, "--effort", effort])
@@ -274,11 +279,9 @@ with tab_run:
             "semantically instead of by keyword match — see delivery-evals/README.md."
         )
         with st.form("evals_form"):
-            which = st.radio(
-                "Which suite",
-                ["QA judge (10 questions, ~1 min)", "Report judge (2 scenarios, slower — the agent runs first)"],
-            )
-            submitted = st.form_submit_button("Run")
+            suite_options = ["QA judge (10 questions, ~1 min)", "Report judge (2 scenarios, slower — the agent runs first)"]
+            which = st.segmented_control("Which suite", suite_options, default=suite_options[0], required=True)
+            submitted = st.form_submit_button("Run", icon=":material/play_arrow:")
         if submitted:
             script = "run_qa_evals.py" if which.startswith("QA") else "run_report_evals.py"
             with st.spinner(f"Running {script}..."):
@@ -389,13 +392,12 @@ with tab_private:
     current_root = private_data_root()
     with st.form("private_root_form"):
         new_root = st.text_input("Private notes folder", value=str(current_root))
-        submitted_root = st.form_submit_button("Save location")
+        submitted_root = st.form_submit_button("Save location", icon=":material/save:")
     if submitted_root and new_root.strip():
         save_private_data_root(Path(new_root.strip()).expanduser())
         st.success(f"Saved. Private notes now resolve to: {Path(new_root.strip()).expanduser()}")
         st.rerun()
 
-    st.divider()
     st.subheader("Add a file")
     st.caption(
         "Upload a meeting transcript or personal notes as .md or .txt "
@@ -405,11 +407,9 @@ with tab_private:
     with st.form("private_upload_form"):
         uploaded = st.file_uploader("File", type=["md", "txt"])
         account_slug = st.text_input("Account (existing or new — this becomes the folder/collection name)")
-        kind = st.radio(
-            "Add as",
-            ["Indexed knowledge (searchable later via ask/agent/MCP)", "One-off agent input (process once)"],
-        )
-        submit_upload = st.form_submit_button("Save file")
+        kind_options = ["Indexed knowledge (searchable later via ask/agent/MCP)", "One-off agent input (process once)"]
+        kind = st.segmented_control("Add as", kind_options, default=kind_options[0], required=True)
+        submit_upload = st.form_submit_button("Save file", icon=":material/upload_file:")
     if submit_upload and uploaded and account_slug.strip():
         content = uploaded.getvalue().decode("utf-8", errors="replace")
         root = private_data_root()
@@ -425,7 +425,6 @@ with tab_private:
             st.info(f"Run \"Rebuild an index\" for account '{account_slug.strip()}' in the Run tab to make it searchable.")
         st.rerun()
 
-    st.divider()
     st.subheader("What's already private")
     priv_data = private_data_dir()
     priv_accounts = sorted(p.name for p in priv_data.iterdir() if p.is_dir()) if priv_data.exists() else []
